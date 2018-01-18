@@ -5,11 +5,27 @@
 
 #include "TString.h"
 #include "TCanvas.h"
+#include "TF1.h"
+#include "TFile.h"
+#include "TTree.h"
 //#include <utility>
 //using std::string;
 using namespace std;
 
-EvAnalyz::EvAnalyz(const ConfigFile & config)
+int GetBinNumber(TProfile* p,float x)
+{
+  TProfile p_aux(*p);
+  return p_aux.Fill(x,0.);
+}
+
+int GetBinNumber2d(TProfile2D* p2, float x, float y)
+{
+  TProfile2D p2_aux(*p2);
+  return p2_aux.Fill(x,y,0.);
+}
+
+EvAnalyz::EvAnalyz(const ConfigFile & config)//:
+//fconfig(config)
 {
    vector<string> Filename;
 
@@ -48,6 +64,23 @@ EvAnalyz::EvAnalyz(const ConfigFile & config)
 
 }
 
+
+//---------------------------------------------------------------------------------------------------------------
+EvAnalyz::EvAnalyz(TChain* outtree, int Nthr, vector<float> thr, string DataLabel, float amp_min, float amp_max, float risetime_min, float risetime_max, float time_offset):
+fDataTree(outtree),
+fNthr(Nthr),
+fthr(thr),
+fDataLabel(DataLabel),
+famp_min(amp_min),
+famp_max(amp_max),
+frisetime_min(risetime_min),
+frisetime_max(risetime_max),
+ftime_offset(time_offset)
+{
+   SetBranchTree();
+   CreateProfile();
+   FillProfile();
+}
 
 //---------------------------------------------------------------------------------------------------------------
 EvAnalyz::~EvAnalyz()
@@ -149,19 +182,20 @@ void EvAnalyz::SetBranchTree()
 
 
 //---------------------------------------------------------------------------------------------------------------
-void EvAnalyz::CreateProfile()
+void EvAnalyz::CreateProfile(bool mkamp, bool mkrisetime, bool mkpos)
 {
    cout<<">> Creating time profiles"<<endl;
    for(int i=0; i<fNthr; i++)
    {
-      fp_time_amp[fthr[i]] = new TProfile(	Form("%s, time vs AMP_MAX, thr = %.0f ph",fDataLabel.c_str(),fthr[i]),
+      if(mkamp)
+         fp_time_amp[fthr[i]] = new TProfile(	Form("%s, time vs AMP_MAX, thr = %.0f ph",fDataLabel.c_str(),fthr[i]),
 						Form("%s, time vs AMP_MAX, thr = %.0f ph",fDataLabel.c_str(),fthr[i]),
 						100,famp_min,famp_max);
-
-      fp_time_risetime[fthr[i]] = new TProfile(	Form("%s, time vs risetime(%.0f-%.0f), thr = %.0f ph",fDataLabel.c_str(),frisetime_min,frisetime_max,fthr[i]),
-						Form("%s, time vs risetime(%.0f-%.0f), thr = %.0f ph",fDataLabel.c_str(),frisetime_min,frisetime_max,fthr[i]),
+      if(mkrisetime)
+         fp_time_risetime[fthr[i]] = new TProfile(Form("%s, time vs risetime(50-20), thr = %.0f ph",fDataLabel.c_str()/*,frisetime_min,frisetime_max*/,fthr[i]),
+						Form("%s, time vs risetime(50-20), thr = %.0f ph",fDataLabel.c_str()/*,frisetime_min,frisetime_max*/,fthr[i]),
 						100,frisetime_min,frisetime_max);
-
+      if(mkpos)
       fp2_time_x_y[fthr[i]] = new TProfile2D(	Form("%s, time vs impact point, thr = %.0f ph",fDataLabel.c_str(),fthr[i]),
 						Form("%s, time vs impact point, thr = %.0f ph",fDataLabel.c_str(),fthr[i]),
 						22,-6.,6.,22,-6.,6.);
@@ -170,7 +204,7 @@ void EvAnalyz::CreateProfile()
 
 
 //---------------------------------------------------------------------------------------------------------------
-void EvAnalyz::FillProfile()
+void EvAnalyz::FillProfile(bool mkamp, bool mkrisetime, bool mkpos)
 {
    Long64_t nentries = fDataTree->GetEntries();
    for(Long64_t ientry=0; ientry<nentries; ientry++)
@@ -179,9 +213,12 @@ void EvAnalyz::FillProfile()
       fDataTree->GetEntry(ientry);
       for(int i=0; i<fNthr; i++)
       {
-         fp_time_amp[fthr[i]] -> Fill(fAMP_MAX,ftime[fthr[i]]-ftime_offset);
-         fp_time_risetime[fthr[i]] -> Fill(ftime[50]-ftime[20], ftime[fthr[i]]-ftime_offset);
-         fp2_time_x_y[fthr[i]] -> Fill(fmu_x_hit, fmu_y_hit, ftime[fthr[i]]-ftime_offset);
+         if(mkamp)
+            fp_time_amp[fthr[i]] -> Fill(fAMP_MAX,ftime[fthr[i]]-ftime_offset);
+         if(mkrisetime)
+            fp_time_risetime[fthr[i]] -> Fill(ftime[50]-ftime[20], ftime[fthr[i]]-ftime_offset);
+         if(mkpos)
+            fp2_time_x_y[fthr[i]] -> Fill(fmu_x_hit, fmu_y_hit, ftime[fthr[i]]-ftime_offset);
       }
    }
 }
@@ -189,7 +226,7 @@ void EvAnalyz::FillProfile()
 
 
 //---------------------------------------------------------------------------------------------------------------
-void EvAnalyz::DrawProfiles()
+void EvAnalyz::DrawProfiles(float time_min, float time_max)
 {
    cout<<"> Drawing time profiles"<<endl;
 //creating canvas
@@ -210,11 +247,15 @@ void EvAnalyz::DrawProfiles()
 //draw time vs amp_max & vs risetime
    fPlots[fDataLabel+", time vs AMP_MAX"]->cd();
    fp_time_amp[fthr[0]]->Draw("");  
+   fp_time_amp[fthr[0]]->GetYaxis()->SetRangeUser(time_min,time_max);
    fPlots[fDataLabel+", time vs risetime"]->cd();
    fp_time_risetime[fthr[0]]->Draw("");  
+   fp_time_risetime[fthr[0]]->GetYaxis()->SetRangeUser(time_min,time_max);
    for(int i=1; i<fNthr; i++)
    {
+      fPlots[fDataLabel+", time vs AMP_MAX"]->cd();
       fp_time_amp[fthr[i]]->Draw("same"); 
+      fPlots[fDataLabel+", time vs risetime"]->cd();
       fp_time_risetime[fthr[i]]->Draw("same"); 
    } 
 
@@ -223,6 +264,7 @@ void EvAnalyz::DrawProfiles()
    {
       fPlots[Form("%s, time vs impact point, thr=%.0f",fDataLabel.c_str(),fthr[i])] -> cd();
       fp2_time_x_y[fthr[i]] -> Draw("COLZ");
+      fp2_time_x_y[fthr[i]] -> GetZaxis()->SetRangeUser(time_min,time_max);
    }
 
 //print time profiles
@@ -259,6 +301,247 @@ void EvAnalyz::DrawProfiles()
       fPlots[Form("%s, time vs impact point, thr=%.0f",fDataLabel.c_str(),fthr[i])]->Print(plotname.Data());
    }
 
+}
+
+//---------------------------------------------------------------------------------------------------------------
+EvAnalyz EvAnalyz::AmpCorrection()
+{
+   cout<<"> Amplitude walk correction"<<endl;
+   std::map<int,TF1*> fitamw;
+   for(int i=0;i<fNthr;i++)
+   {
+      fitamw[fthr[i]] = new TF1(Form("amplitude walk correction, thr%i",fthr[i]),"[2]+[0]*exp(-[1]*x)",famp_min,famp_max);
+      fitamw[fthr[i]]->SetLineWidth(1);
+      fitamw[fthr[i]]->SetLineColor(1);
+   }
+   fitamw[fthr[fNthr-1]]->SetParameters(0.01,0.0006,1.);
+   for(int i=fNthr-1;i>-1;i--)
+   {
+      fp_time_amp[fthr[i]]->Fit(fitamw[fthr[i]],"R");
+      if(i>=1)
+      {
+         fitamw[fthr[i-1]]->SetParameter(0,fitamw[fthr[i]]->GetParameter(0));
+         fitamw[fthr[i-1]]->SetParameter(1,fitamw[fthr[i]]->GetParameter(1));
+         fitamw[fthr[i-1]]->SetParameter(2,fitamw[fthr[i]]->GetParameter(2));
+      }
+   }
+
+   //branch the new tree
+   cout<<">> Branching new tree"<<endl;
+   float mu_y_hit, mu_x_hit, AMP_MAX;
+   std::map<float,float> time;
+   TFile* outfile=new TFile(("/tmp/"+fDataLabel+"_amw.root").c_str(),"RECREATE");
+   TTree *outtree=new TTree("digi",(fDataLabel+" amplitude walk corrected").c_str());
+   //outtree->Branch("eventNb",&eventNb,"eventNb/I");
+   outtree->Branch("mu_x_hit",&mu_x_hit,"mu_x_hit/F");
+   outtree->Branch("mu_y_hit",&mu_y_hit,"mu_y_hit/F");
+   outtree->Branch("AMP_MAX",&AMP_MAX,"AMP_MAX/F");
+   for(int i=0; i<fNthr; i++)
+      outtree->Branch( Form("LDE%.0f",fthr[i]) , &time[fthr[i]] , Form("LDE%.0f/F",fthr[i]) );
+
+   
+   //amplitude correction 
+   cout<<">> Filling new tree"<<endl;
+   Long64_t nentries = fDataTree->GetEntries();
+   for (Long64_t ientry=0;ientry<nentries;ientry++)
+   {
+      cout<<"Reading entry "<<ientry<< "\r" << std::flush;
+      fDataTree->GetEntry(ientry);
+      mu_x_hit = fmu_x_hit;
+      mu_y_hit = fmu_y_hit;         
+      AMP_MAX = fAMP_MAX;
+      for(int i=0;i<fNthr;i++)
+         time[fthr[i]] = ftime[fthr[i]] - ftime_offset - fitamw[fthr[i]]->Eval(AMP_MAX);
+
+      outtree->Fill();//Fill the output ntuple
+   }
+   outtree->Write();
+   outfile->Close();
+   TChain* outchain = new TChain("digi","digi amplitude walk corrected");
+   outchain->Add(("/tmp/"+fDataLabel+"_amw.root").c_str());
+   //create the new EvAnalyz
+   cout<<">> Creating "<<fDataLabel<<"_amw"<<endl;
+   EvAnalyz data_amw(outchain, fNthr, fthr, fDataLabel+"_amw", famp_min, famp_max, frisetime_min, frisetime_max, 0./*ftime_offset=0*/);
+   return data_amw;
+
+}
+
+
+//---------------------------------------------------------------------------------------------------------------
+EvAnalyz EvAnalyz::MitigatedAmpCorrection(float amp_min_fit, float amp_max_fit)
+{
+   cout<<"> Mitigated amplitude walk correction"<<endl;
+   std::map<int,TF1*> fitamw;
+   for(int i=0;i<fNthr;i++)
+   {
+      fitamw[fthr[i]] = new TF1(Form("mitigated amplitude walk correction, thr%i",fthr[i]),"[0] + [1]*log([2]*x)",amp_min_fit,amp_max_fit);
+      fitamw[fthr[i]]->SetLineWidth(1);
+      fitamw[fthr[i]]->SetLineColor(1);
+   }
+   fitamw[fthr[fNthr-1]]->SetParameters(10.4,-0.3,0.00013);
+   for(int i=fNthr-1;i>-1;i--)
+   {
+      fp_time_amp[fthr[i]]->Fit(fitamw[fthr[i]],"R");
+      if(i>=1)
+      {
+         fitamw[fthr[i-1]]->SetParameter(0,fitamw[fthr[i]]->GetParameter(0));
+         fitamw[fthr[i-1]]->SetParameter(1,fitamw[fthr[i]]->GetParameter(1));
+         fitamw[fthr[i-1]]->SetParameter(2,fitamw[fthr[i]]->GetParameter(2));
+      }
+   }
+
+   //branch the new tree
+   cout<<">> Branching new tree"<<endl;
+   float mu_y_hit, mu_x_hit, AMP_MAX;
+   std::map<float,float> time;
+   TFile* outfile=new TFile(("/tmp/"+fDataLabel+"_mitigatedamw.root").c_str(),"RECREATE");
+   TTree *outtree=new TTree("digi",(fDataLabel+" mitigated amplitude walk corrected").c_str());
+   //outtree->Branch("eventNb",&eventNb,"eventNb/I");
+   outtree->Branch("mu_x_hit",&mu_x_hit,"mu_x_hit/F");
+   outtree->Branch("mu_y_hit",&mu_y_hit,"mu_y_hit/F");
+   outtree->Branch("AMP_MAX",&AMP_MAX,"AMP_MAX/F");
+   for(int i=0; i<fNthr; i++)
+      outtree->Branch( Form("LDE%.0f",fthr[i]) , &time[fthr[i]] , Form("LDE%.0f/F",fthr[i]) );
+
+   
+   //amplitude correction 
+   cout<<">> Filling new tree"<<endl;
+   Long64_t nentries = fDataTree->GetEntries();
+   for (Long64_t ientry=0;ientry<nentries;ientry++)
+   {
+      cout<<"Reading entry "<<ientry<< "\r" << std::flush;
+      fDataTree->GetEntry(ientry);
+      mu_x_hit = fmu_x_hit;
+      mu_y_hit = fmu_y_hit;         
+      AMP_MAX = fAMP_MAX;
+      for(int i=0;i<fNthr;i++)
+         time[fthr[i]] = ftime[fthr[i]] - ftime_offset - fitamw[fthr[i]]->Eval(AMP_MAX);
+
+      outtree->Fill();//Fill the output ntuple
+   }
+   outtree->Write();
+   outfile->Close();
+   TChain* outchain = new TChain("digi","digi mitigated amplitude walk corrected");
+   outchain->Add(("/tmp/"+fDataLabel+"_mitigatedamw.root").c_str());
+   //create the new EvAnalyz
+   cout<<">> Creating "<<fDataLabel<<"_mitigatedamw"<<endl;
+   EvAnalyz data_amw(outchain, fNthr, fthr, fDataLabel+"_mitigatedamw", famp_min, famp_max, frisetime_min, frisetime_max, 0./*ftime_offset=0*/);
+   return data_amw;
+
+}
+
+
+//---------------------------------------------------------------------------------------------------------------------------
+EvAnalyz EvAnalyz::PosCorrection()
+{
+   cout<<"> Position correction"<<endl;
+
+   //branch the new tree
+   cout<<">> Branching new tree"<<endl;
+   float mu_y_hit, mu_x_hit, AMP_MAX;
+   std::map<float,float> time;
+   TFile* outfile=new TFile(("/tmp/"+fDataLabel+"_poscorr.root").c_str(),"RECREATE");
+   TTree *outtree=new TTree("digi",(fDataLabel+" impact point correction").c_str());
+   //outtree->Branch("eventNb",&eventNb,"eventNb/I");
+   outtree->Branch("mu_x_hit",&mu_x_hit,"mu_x_hit/F");
+   outtree->Branch("mu_y_hit",&mu_y_hit,"mu_y_hit/F");
+   outtree->Branch("AMP_MAX",&AMP_MAX,"AMP_MAX/F");
+   for(int i=0; i<fNthr; i++)
+      outtree->Branch( Form("LDE%.0f",fthr[i]) , &time[fthr[i]] , Form("LDE%.0f/F",fthr[i]) );
+
+   //position correction 
+   cout<<">> Filling new tree"<<endl;
+   Long64_t nentries = fDataTree->GetEntries();
+   for (Long64_t ientry=0;ientry<nentries;ientry++)
+   {
+      cout<<"Reading entry "<<ientry<< "\r" << std::flush;
+      fDataTree->GetEntry(ientry);
+      mu_x_hit = fmu_x_hit;
+      mu_y_hit = fmu_y_hit;         
+      AMP_MAX = fAMP_MAX;
+      for(int i=0;i<fNthr;i++)
+         time[fthr[i]] = ftime[fthr[i]] - ftime_offset - fp2_time_x_y[fthr[i]]->GetBinContent(GetBinNumber2d(fp2_time_x_y[fthr[i]],fmu_x_hit,fmu_y_hit));
+
+      outtree->Fill();//Fill the output ntuple
+   }
+   outtree->Write();
+   outfile->Close();
+   TChain* outchain = new TChain("digi","digi impact point corrected");
+   outchain->Add(("/tmp/"+fDataLabel+"_poscorr.root").c_str());
+   //create the new EvAnalyz
+   cout<<">> Creating "<<fDataLabel<<"_poscorr"<<endl;
+   EvAnalyz data_poscorr(outchain, fNthr, fthr, fDataLabel+"_poscorr", famp_min, famp_max, frisetime_min, frisetime_max, 0./*ftime_offset=0*/);
+   return data_poscorr;
+
+}
+
+EvAnalyz EvAnalyz::RiseTimeCorrection()
+{
+   cout<<"> Risetime correction"<<endl;
+
+   //branch the new tree
+   cout<<">> Branching new tree"<<endl;
+   float mu_y_hit, mu_x_hit, AMP_MAX;
+   std::map<float,float> time;
+   TFile* outfile=new TFile(("/tmp/"+fDataLabel+"_risetimecorr.root").c_str(),"RECREATE");
+   TTree *outtree=new TTree("digi",(fDataLabel+" risetime correction").c_str());
+   //outtree->Branch("eventNb",&eventNb,"eventNb/I");
+   outtree->Branch("mu_x_hit",&mu_x_hit,"mu_x_hit/F");
+   outtree->Branch("mu_y_hit",&mu_y_hit,"mu_y_hit/F");
+   outtree->Branch("AMP_MAX",&AMP_MAX,"AMP_MAX/F");
+   for(int i=0; i<fNthr; i++)
+      outtree->Branch( Form("LDE%.0f",fthr[i]) , &time[fthr[i]] , Form("LDE%.0f/F",fthr[i]) );
+
+   //risetime correction 
+   cout<<">> Filling new tree"<<endl;
+   Long64_t nentries = fDataTree->GetEntries();
+   for (Long64_t ientry=0;ientry<nentries;ientry++)
+   {
+      cout<<"Reading entry "<<ientry<< "\r" << std::flush;
+      fDataTree->GetEntry(ientry);
+      mu_x_hit = fmu_x_hit;
+      mu_y_hit = fmu_y_hit;         
+      AMP_MAX = fAMP_MAX;
+      for(int i=0;i<fNthr;i++)
+         time[fthr[i]] = ftime[fthr[i]] - ftime_offset - fp_time_risetime[fthr[i]]->GetBinContent(GetBinNumber(fp_time_risetime[fthr[i]],ftime[50]-ftime[20]));
+
+      outtree->Fill();//Fill the output ntuple
+   }
+   outtree->Write();
+   outfile->Close();
+   TChain* outchain = new TChain("digi","digi risetime corrected");
+   outchain->Add(("/tmp/"+fDataLabel+"_risetimecorr.root").c_str());
+   //create the new EvAnalyz
+   cout<<">> Creating "<<fDataLabel<<"_risetimecorr"<<endl;
+   EvAnalyz data_risetimecorr(outchain, fNthr, fthr, fDataLabel+"_risetimecorr", famp_min, famp_max, frisetime_min, frisetime_max, 0./*ftime_offset=0*/);
+   return data_risetimecorr;
+
+}
+
+void EvAnalyz::SetAmpRange(float amp_min,float amp_max)
+{
+   famp_min=amp_min;
+   famp_max=amp_max;
+   cout<<"> Updating time vs amp profile"<<endl;
+   for(int i=0; i<fNthr; i++)
+   {
+      delete fp_time_amp[fthr[i]];
+   }
+   CreateProfile(true,false,false);
+   FillProfile(true,false,false);
+}
+
+
+void EvAnalyz::SetRiseTimeRange(float risetime_min,float risetime_max)
+{
+   frisetime_min=risetime_min;
+   frisetime_max=risetime_max;
+   cout<<"> Updating time vs risetime profile"<<endl;
+   for(int i=0; i<fNthr; i++)
+      delete fp_time_risetime[fthr[i]];
+
+   CreateProfile(false,true,false);
+   FillProfile(false,true,false);
 }
 
 

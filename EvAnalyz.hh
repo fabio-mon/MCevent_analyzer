@@ -25,6 +25,7 @@ class EvAnalyz
 {
    // Data
    protected:
+      //ConfigFile fconfig;
       TChain* fDataTree;
       float fmu_y_hit, fmu_x_hit, fAMP_MAX;
       std::map<float,float> ftime;
@@ -41,15 +42,18 @@ class EvAnalyz
 
    // Methods
    public:
-      EvAnalyz(const ConfigFile & ConfFile);
+      EvAnalyz(const ConfigFile & config);
+      EvAnalyz(TChain* outtree, int Nthr, vector<float> thr, string DataLabel, float famp_min, float famp_max, float frisetime_min, float frisetime_max, float ftime_offset);
       ~EvAnalyz();
-      void FillProfile();
-      //EvAnalyz& AmpCorrection();
-      //EvAnalyz* EffectiveAmpCorrection();
-      //EvAnalyz* PosCorrection();
-      //EvAnalyz* RiseTimeCorrection();
+      void FillProfile(bool mkamp=true, bool mkrisetime=true, bool mkpos=true);
+      EvAnalyz AmpCorrection();
+      EvAnalyz MitigatedAmpCorrection(float amp_min_fit, float amp_max_fit);
+      EvAnalyz PosCorrection();
+      EvAnalyz RiseTimeCorrection();
       //void DrawTimeRes();
-      void DrawProfiles();
+      void DrawProfiles(float time_min=0,float time_max=2);
+      void SetAmpRange(float amp_min,float amp_max);
+      void SetRiseTimeRange(float risetime_min,float risetime_max);
       //TChain& GetTree();
       //std::map<float,TProfile*>& Getp_time_amp();
       //std::map<float,TProfile*>& Getp_time_risetime();
@@ -57,7 +61,7 @@ class EvAnalyz
 
    protected:
       void SetBranchTree();
-      void CreateProfile();
+      void CreateProfile(bool mkamp=true, bool mkrisetime=true, bool mkpos=true);
       void ParseConfigFile(const ConfigFile & config);
 };
 
