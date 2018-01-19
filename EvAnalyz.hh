@@ -10,6 +10,7 @@
 #include "TProfile2D.h"
 #include "ConfigFile.hh"
 #include "TCanvas.h"
+#include "TGraphErrors.h"
 //#include "TH2.h"
 //#include "TH2F.h"
 
@@ -39,6 +40,7 @@ class EvAnalyz
       std::map<float,TProfile*> fp_time_risetime;
       std::map<float,TProfile2D*> fp2_time_x_y;
       std::map<std::string,TCanvas*> fPlots;
+      std::map<float,TH1F*> fh_time;
 
    // Methods
    public:
@@ -46,15 +48,17 @@ class EvAnalyz
       EvAnalyz(TChain* outtree, int Nthr, vector<float> thr, string DataLabel, float famp_min, float famp_max, float frisetime_min, float frisetime_max, float ftime_offset);
       ~EvAnalyz();
       void FillProfile(bool mkamp=true, bool mkrisetime=true, bool mkpos=true);
+      void FillHisto();
       EvAnalyz AmpCorrection();
       EvAnalyz MitigatedAmpCorrection(float amp_min_fit, float amp_max_fit);
       EvAnalyz PosCorrection();
       EvAnalyz RiseTimeCorrection();
-      //void DrawTimeRes();
+      TGraphErrors* ThrScan(std::string option);
+      void DrawHistos();
       void DrawProfiles(float time_min=0,float time_max=2);
       void SetAmpRange(float amp_min,float amp_max);
       void SetRiseTimeRange(float risetime_min,float risetime_max);
-      //TChain& GetTree();
+      TChain* GetChain() {return fDataTree;};
       //std::map<float,TProfile*>& Getp_time_amp();
       //std::map<float,TProfile*>& Getp_time_risetime();
       //std::map<float,TProfile2D*>& Getp2_time_x_y();
@@ -62,6 +66,7 @@ class EvAnalyz
    protected:
       void SetBranchTree();
       void CreateProfile(bool mkamp=true, bool mkrisetime=true, bool mkpos=true);
+      void CreateHisto();
       void ParseConfigFile(const ConfigFile & config);
 };
 

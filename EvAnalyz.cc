@@ -2,14 +2,17 @@
 #include "ConfigFile.hh"
 
 #include <vector>
+#include <string>
 
 #include "TString.h"
 #include "TCanvas.h"
 #include "TF1.h"
 #include "TFile.h"
 #include "TTree.h"
-//#include <utility>
-//using std::string;
+#include "TLegend.h"
+#include "TLatex.h"
+#include "TStyle.h"
+
 using namespace std;
 
 int GetBinNumber(TProfile* p,float x)
@@ -24,9 +27,13 @@ int GetBinNumber2d(TProfile2D* p2, float x, float y)
   return p2_aux.Fill(x,y,0.);
 }
 
+void FindSmallestInterval(float* ret, TH1F* histo, const float& fraction, const bool& verbosity);
+
 EvAnalyz::EvAnalyz(const ConfigFile & config)//:
 //fconfig(config)
 {
+   gStyle->SetOptStat(0);
+   gStyle->SetOptTitle(0);
    vector<string> Filename;
 
    if(config.keyExists("Filename"))
@@ -60,7 +67,9 @@ EvAnalyz::EvAnalyz(const ConfigFile & config)//:
       cout<<"> "<<nfiles<<" file added to chain for a total of "<<fDataTree->GetEntries()<<" entries"<<endl;
    SetBranchTree();
    CreateProfile();
+   CreateHisto();
    FillProfile();
+   FillHisto();
 
 }
 
@@ -77,25 +86,42 @@ frisetime_min(risetime_min),
 frisetime_max(risetime_max),
 ftime_offset(time_offset)
 {
+   gStyle->SetOptStat(0);
+   gStyle->SetOptTitle(0);
    SetBranchTree();
    CreateProfile();
+   CreateHisto();
    FillProfile();
+   FillHisto();
 }
 
 //---------------------------------------------------------------------------------------------------------------
 EvAnalyz::~EvAnalyz()
 {
-   cout<<"> Deleting profiles"<<endl;
+   cout<<"> Deleting profiles";
    for(int i=0; i<fNthr; i++)
    {
       delete fp_time_amp[fthr[i]];
       delete fp_time_risetime[fthr[i]];
       delete fp2_time_x_y[fthr[i]];
    }
+   cout<<"OK"<<endl;
 
-   cout<<"> Deleting chain"<<endl;
+   cout<<"> Deleting histos";
+   for(int i=0; i<fNthr; i++)
+   {
+      delete fh_time[fthr[i]];
+   }
+   cout<<"OK"<<endl;
+
+   cout<<"> Deleting chain";
    delete fDataTree;
+   cout<<"OK"<<endl;
 
+   cout<<"> Deleting canvases";
+   for(std::map<string,TCanvas*>::iterator it=fPlots.begin(); it!=fPlots.end(); ++it)
+      if( it->second ) delete it->second;
+   cout<<"OK"<<endl;
 }
 
 
@@ -203,13 +229,24 @@ void EvAnalyz::CreateProfile(bool mkamp, bool mkrisetime, bool mkpos)
 }
 
 
+//-------------------------------------------------------------------------------------------------------------
+void EvAnalyz::CreateHisto()
+{
+   cout<<">> Creating time histogram"<<endl;
+   for(int i=0; i<fNthr; i++)
+      fh_time[fthr[i]] = new TH1F(	Form("%s, time distribution, thr = %.0f ph",fDataLabel.c_str(),fthr[i]),
+					Form("%s, time distribution, thr = %.0f ph",fDataLabel.c_str(),fthr[i]),
+					/*150*/200,-0.505,/*0.995*/1.495);
+}
+
 //---------------------------------------------------------------------------------------------------------------
 void EvAnalyz::FillProfile(bool mkamp, bool mkrisetime, bool mkpos)
 {
+   cout<<">> Filling profiles"<<endl;
    Long64_t nentries = fDataTree->GetEntries();
    for(Long64_t ientry=0; ientry<nentries; ientry++)
    {
-      cout<<"Reading entry "<<ientry<< "\r" << std::flush;
+      cout<<"\tReading entry "<<ientry<< "\r" << std::flush;
       fDataTree->GetEntry(ientry);
       for(int i=0; i<fNthr; i++)
       {
@@ -221,10 +258,24 @@ void EvAnalyz::FillProfile(bool mkamp, bool mkrisetime, bool mkpos)
             fp2_time_x_y[fthr[i]] -> Fill(fmu_x_hit, fmu_y_hit, ftime[fthr[i]]-ftime_offset);
       }
    }
+   cout<<"\n";
 }
 
 
-
+//---------------------------------------------------------------------------------------------------------------------
+void EvAnalyz::FillHisto()
+{
+   cout<<">> Filling time histo"<<endl;;
+   Long64_t nentries = fDataTree->GetEntries();
+   for(Long64_t ientry=0; ientry<nentries; ientry++)
+   {
+      cout<<"\tReading entry "<<ientry<< "\r" << std::flush;
+      fDataTree->GetEntry(ientry);
+      for(int i=0; i<fNthr; i++)
+          fh_time[fthr[i]]->Fill(ftime[fthr[i]]-ftime_offset);
+   }
+   cout<<"\n";
+}
 //---------------------------------------------------------------------------------------------------------------
 void EvAnalyz::DrawProfiles(float time_min, float time_max)
 {
@@ -232,6 +283,15 @@ void EvAnalyz::DrawProfiles(float time_min, float time_max)
 //creating canvas
    fPlots[fDataLabel+", time vs AMP_MAX"] = new TCanvas( Form("%s, time vs AMP_MAX",fDataLabel.c_str()) , Form("%s, time vs AMP_MAX",fDataLabel.c_str()) );
    fPlots[fDataLabel+", time vs risetime"] = new TCanvas( Form("%s, time vs risetime",fDataLabel.c_str()) , Form("%s, time vs risetime",fDataLabel.c_str()) );
+
+//creating legends
+   TLegend leg_time_amp(0.1,0.7,0.48,0.9);
+   TLegend leg_time_risetime(0.1,0.7,0.48,0.9);
+
+//creating title object
+   TLatex title;
+   title.SetNDC();
+
    for(int i=0; i<fNthr; i++)
    {
       fPlots[Form("%s, time vs impact point, thr=%.0f",fDataLabel.c_str(),fthr[i])] = new TCanvas( Form("%s, time vs impact point, thr=%.0f",fDataLabel.c_str(), fthr[i]) , Form("%s, time vs impact point",fDataLabel.c_str()) ,400,400);
@@ -247,17 +307,34 @@ void EvAnalyz::DrawProfiles(float time_min, float time_max)
 //draw time vs amp_max & vs risetime
    fPlots[fDataLabel+", time vs AMP_MAX"]->cd();
    fp_time_amp[fthr[0]]->Draw("");  
+   leg_time_amp.AddEntry(fp_time_amp[fthr[0]],Form("thr = %.0f ph",fthr[0]),"l");
    fp_time_amp[fthr[0]]->GetYaxis()->SetRangeUser(time_min,time_max);
+   fp_time_amp[fthr[0]]->GetXaxis()->SetTitle("amp max (ph)"); 
+   fp_time_amp[fthr[0]]->GetYaxis()->SetTitle("time (ns)");  
+ 
    fPlots[fDataLabel+", time vs risetime"]->cd();
    fp_time_risetime[fthr[0]]->Draw("");  
+   leg_time_risetime.AddEntry(fp_time_risetime[fthr[0]],Form("thr = %.0f ph",fthr[0]),"l");
    fp_time_risetime[fthr[0]]->GetYaxis()->SetRangeUser(time_min,time_max);
+   fp_time_risetime[fthr[0]]->GetXaxis()->SetTitle("risetime 20-50(ns)"); 
+   fp_time_risetime[fthr[0]]->GetYaxis()->SetTitle("time (ns)"); 
+
    for(int i=1; i<fNthr; i++)
    {
       fPlots[fDataLabel+", time vs AMP_MAX"]->cd();
       fp_time_amp[fthr[i]]->Draw("same"); 
+      leg_time_amp.AddEntry(fp_time_amp[fthr[i]],Form("thr = %.0f ph",fthr[i]),"l");
       fPlots[fDataLabel+", time vs risetime"]->cd();
       fp_time_risetime[fthr[i]]->Draw("same"); 
+      leg_time_risetime.AddEntry(fp_time_risetime[fthr[i]],Form("thr = %.0f ph",fthr[i]),"l");
    } 
+   fPlots[fDataLabel+", time vs AMP_MAX"]->cd();
+   leg_time_amp.Draw();
+   title.DrawLatex(0.1,0.93,(fDataLabel+", time vs AMP_MAX").c_str());
+
+   fPlots[fDataLabel+", time vs risetime"]->cd();
+   leg_time_risetime.Draw();
+   title.DrawLatex(0.1,0.93,(fDataLabel+", time vs risetime").c_str());
 
 //draw time vs impact point
    for(int i=0; i<fNthr; i++)
@@ -265,6 +342,10 @@ void EvAnalyz::DrawProfiles(float time_min, float time_max)
       fPlots[Form("%s, time vs impact point, thr=%.0f",fDataLabel.c_str(),fthr[i])] -> cd();
       fp2_time_x_y[fthr[i]] -> Draw("COLZ");
       fp2_time_x_y[fthr[i]] -> GetZaxis()->SetRangeUser(time_min,time_max);
+      fp2_time_x_y[fthr[i]] -> GetXaxis()->SetTitle("x (mm)"); 
+      fp2_time_x_y[fthr[i]] -> GetYaxis()->SetTitle("y (mm)"); 
+      fp2_time_x_y[fthr[i]] -> GetZaxis()->SetTitle("time (ns)"); 
+      title.DrawLatex(0.1,0.93,Form("%s, time vs impact point, thr = %.0f",fDataLabel.c_str(),fthr[i]));
    }
 
 //print time profiles
@@ -303,6 +384,55 @@ void EvAnalyz::DrawProfiles(float time_min, float time_max)
 
 }
 
+
+//---------------------------------------------------------------------------------------------------------------
+void EvAnalyz::DrawHistos()
+{
+   cout<<"> Drawing time histos"<<endl;
+
+//creating title object
+   TLatex title;
+   title.SetNDC();
+   //creating canvas
+   for(int i=0; i<fNthr; i++)
+   {
+      fPlots[Form("%s, time histo, thr=%.0f",fDataLabel.c_str(),fthr[i])] = new TCanvas( Form("%s, time histo, thr=%.0f",fDataLabel.c_str(), fthr[i]) , Form("%s, time histo",fDataLabel.c_str()));
+   }
+
+//esthetical set
+   for(int i=0; i<fNthr; i++)
+      fh_time[fthr[i]]->SetLineColor(i+1);  
+
+//draw time vs impact point
+   for(int i=0; i<fNthr; i++)
+   {
+      fPlots[Form("%s, time histo, thr=%.0f",fDataLabel.c_str(),fthr[i])] -> cd();
+      fh_time[fthr[i]] -> Draw();
+      fh_time[fthr[i]] -> GetXaxis()->SetTitle("time (ns)"); 
+      //fp2_time_x_y[fthr[i]] -> GetZaxis()->SetRangeUser(time_min,time_max);
+      title.DrawLatex(0.1,0.93,Form("%s, time distribution, thr = %.0f",fDataLabel.c_str(),fthr[i]));
+   }
+
+//print time histos
+   TString plotname;
+   for(int i=0; i<fNthr; i++)
+   {
+      plotname = Form("%s, time histo, thr=%.0f",fDataLabel.c_str(),fthr[i]);
+      plotname.ReplaceAll(" ","_");
+      plotname.ReplaceAll("=","");
+      plotname.ReplaceAll(",","_");
+      plotname.ReplaceAll(".","p");
+      plotname+= ".pdf";
+      fPlots[Form("%s, time histo, thr=%.0f",fDataLabel.c_str(),fthr[i])]->Print(plotname.Data());
+      plotname.ReplaceAll("pdf","png");
+      fPlots[Form("%s, time histo, thr=%.0f",fDataLabel.c_str(),fthr[i])]->Print(plotname.Data());
+   }
+
+}
+
+
+
+
 //---------------------------------------------------------------------------------------------------------------
 EvAnalyz EvAnalyz::AmpCorrection()
 {
@@ -310,7 +440,7 @@ EvAnalyz EvAnalyz::AmpCorrection()
    std::map<int,TF1*> fitamw;
    for(int i=0;i<fNthr;i++)
    {
-      fitamw[fthr[i]] = new TF1(Form("amplitude walk correction, thr%i",fthr[i]),"[2]+[0]*exp(-[1]*x)",famp_min,famp_max);
+      fitamw[fthr[i]] = new TF1(Form("amplitude walk correction, thr = %.0f",fthr[i]),"[2]+[0]*exp(-[1]*x)",famp_min,famp_max);
       fitamw[fthr[i]]->SetLineWidth(1);
       fitamw[fthr[i]]->SetLineColor(1);
    }
@@ -330,7 +460,7 @@ EvAnalyz EvAnalyz::AmpCorrection()
    cout<<">> Branching new tree"<<endl;
    float mu_y_hit, mu_x_hit, AMP_MAX;
    std::map<float,float> time;
-   TFile* outfile=new TFile(("/tmp/"+fDataLabel+"_amw.root").c_str(),"RECREATE");
+   TFile outfile(("/tmp/"+fDataLabel+"_amw.root").c_str(),"RECREATE");
    TTree *outtree=new TTree("digi",(fDataLabel+" amplitude walk corrected").c_str());
    //outtree->Branch("eventNb",&eventNb,"eventNb/I");
    outtree->Branch("mu_x_hit",&mu_x_hit,"mu_x_hit/F");
@@ -356,7 +486,7 @@ EvAnalyz EvAnalyz::AmpCorrection()
       outtree->Fill();//Fill the output ntuple
    }
    outtree->Write();
-   outfile->Close();
+   outfile.Close();
    TChain* outchain = new TChain("digi","digi amplitude walk corrected");
    outchain->Add(("/tmp/"+fDataLabel+"_amw.root").c_str());
    //create the new EvAnalyz
@@ -374,7 +504,7 @@ EvAnalyz EvAnalyz::MitigatedAmpCorrection(float amp_min_fit, float amp_max_fit)
    std::map<int,TF1*> fitamw;
    for(int i=0;i<fNthr;i++)
    {
-      fitamw[fthr[i]] = new TF1(Form("mitigated amplitude walk correction, thr%i",fthr[i]),"[0] + [1]*log([2]*x)",amp_min_fit,amp_max_fit);
+      fitamw[fthr[i]] = new TF1(Form("mitigated amplitude walk correction, thr = %.0f",fthr[i]),"[0] + [1]*log([2]*x)",amp_min_fit,amp_max_fit);
       fitamw[fthr[i]]->SetLineWidth(1);
       fitamw[fthr[i]]->SetLineColor(1);
    }
@@ -394,7 +524,7 @@ EvAnalyz EvAnalyz::MitigatedAmpCorrection(float amp_min_fit, float amp_max_fit)
    cout<<">> Branching new tree"<<endl;
    float mu_y_hit, mu_x_hit, AMP_MAX;
    std::map<float,float> time;
-   TFile* outfile=new TFile(("/tmp/"+fDataLabel+"_mitigatedamw.root").c_str(),"RECREATE");
+   TFile outfile(("/tmp/"+fDataLabel+"_mitigatedamw.root").c_str(),"RECREATE");
    TTree *outtree=new TTree("digi",(fDataLabel+" mitigated amplitude walk corrected").c_str());
    //outtree->Branch("eventNb",&eventNb,"eventNb/I");
    outtree->Branch("mu_x_hit",&mu_x_hit,"mu_x_hit/F");
@@ -420,7 +550,7 @@ EvAnalyz EvAnalyz::MitigatedAmpCorrection(float amp_min_fit, float amp_max_fit)
       outtree->Fill();//Fill the output ntuple
    }
    outtree->Write();
-   outfile->Close();
+   outfile.Close();
    TChain* outchain = new TChain("digi","digi mitigated amplitude walk corrected");
    outchain->Add(("/tmp/"+fDataLabel+"_mitigatedamw.root").c_str());
    //create the new EvAnalyz
@@ -440,7 +570,7 @@ EvAnalyz EvAnalyz::PosCorrection()
    cout<<">> Branching new tree"<<endl;
    float mu_y_hit, mu_x_hit, AMP_MAX;
    std::map<float,float> time;
-   TFile* outfile=new TFile(("/tmp/"+fDataLabel+"_poscorr.root").c_str(),"RECREATE");
+   TFile outfile(("/tmp/"+fDataLabel+"_poscorr.root").c_str(),"RECREATE");
    TTree *outtree=new TTree("digi",(fDataLabel+" impact point correction").c_str());
    //outtree->Branch("eventNb",&eventNb,"eventNb/I");
    outtree->Branch("mu_x_hit",&mu_x_hit,"mu_x_hit/F");
@@ -465,7 +595,7 @@ EvAnalyz EvAnalyz::PosCorrection()
       outtree->Fill();//Fill the output ntuple
    }
    outtree->Write();
-   outfile->Close();
+   outfile.Close();
    TChain* outchain = new TChain("digi","digi impact point corrected");
    outchain->Add(("/tmp/"+fDataLabel+"_poscorr.root").c_str());
    //create the new EvAnalyz
@@ -483,7 +613,7 @@ EvAnalyz EvAnalyz::RiseTimeCorrection()
    cout<<">> Branching new tree"<<endl;
    float mu_y_hit, mu_x_hit, AMP_MAX;
    std::map<float,float> time;
-   TFile* outfile=new TFile(("/tmp/"+fDataLabel+"_risetimecorr.root").c_str(),"RECREATE");
+   TFile outfile(("/tmp/"+fDataLabel+"_risetimecorr.root").c_str(),"RECREATE");
    TTree *outtree=new TTree("digi",(fDataLabel+" risetime correction").c_str());
    //outtree->Branch("eventNb",&eventNb,"eventNb/I");
    outtree->Branch("mu_x_hit",&mu_x_hit,"mu_x_hit/F");
@@ -508,7 +638,7 @@ EvAnalyz EvAnalyz::RiseTimeCorrection()
       outtree->Fill();//Fill the output ntuple
    }
    outtree->Write();
-   outfile->Close();
+   outfile.Close();
    TChain* outchain = new TChain("digi","digi risetime corrected");
    outchain->Add(("/tmp/"+fDataLabel+"_risetimecorr.root").c_str());
    //create the new EvAnalyz
@@ -543,5 +673,124 @@ void EvAnalyz::SetRiseTimeRange(float risetime_min,float risetime_max)
    CreateProfile(false,true,false);
    FillProfile(false,true,false);
 }
+
+TGraphErrors* EvAnalyz::ThrScan(std::string option)
+{
+
+   TGraphErrors* res_thr = new TGraphErrors();
+   res_thr->SetName((fDataLabel+"_res_thr").c_str());
+   res_thr->SetTitle((fDataLabel+"_res_thr").c_str());
+   TF1* fitfunc = new TF1("time distribution fit","gaus(0)",-0.505,0.995);
+   float* vals = new float[4];
+   float min;
+   float max;
+   float SmallInt;
+   for(int i=0; i<fNthr; i++)
+   {
+      if(option=="RMS" || option=="rms" || option=="Rms")
+      {
+         res_thr->SetPoint(i,fthr[i],fh_time[fthr[i]]->GetRMS());
+         res_thr->SetPointError(i,0.,fh_time[fthr[i]]->GetRMSError());
+      }
+      else
+         if(option=="FIT" || option=="fit" || option=="Fit")
+         {
+            fitfunc->SetParameter(1,fh_time[fthr[i]]->GetMean());
+            fitfunc->SetParameter(2,fh_time[fthr[i]]->GetRMS());
+            fh_time[fthr[i]]->Fit(fitfunc);
+            res_thr->SetPoint(i,fthr[i],fitfunc->GetParameter(2));
+            res_thr->SetPointError(i,0.,fitfunc->GetParError(2));
+         }
+         else
+            if(option=="SMALLESTINTERVAL" || option=="smallestinterval" || option=="SmallestInterval")
+            {
+               FindSmallestInterval(vals,fh_time[fthr[i]],0.68,true); 
+               min = vals[2];
+               max = vals[3];
+               SmallInt = 0.5*(max-min);
+               res_thr->SetPoint(i,fthr[i],SmallInt);
+               res_thr->SetPointError(i,0.,fh_time[fthr[i]]->GetRMSError());
+            }
+            else
+            {
+               cout<<"[ERROR]: Option "<<option<<" not valid"<<endl;
+               break;
+            } 
+   }
+   if(vals) delete[] vals;
+   return res_thr;   
+}
+
+
+void FindSmallestInterval(float* ret, TH1F* histo, const float& fraction, const bool& verbosity)
+{
+  float integralMax = fraction * histo->Integral();
+  
+  int N = histo -> GetNbinsX();
+  int M1 = 0;
+  int M2 = 0;
+  for(int bin1 = 0; bin1 < N; ++bin1)
+  {
+    if( histo->GetBinContent(bin1+1) > 0. && M1 == 0 ) M1 = bin1-1;
+    if( histo->GetBinContent(bin1+1) > 0. ) M2 = bin1+2;
+  }
+  
+  std::map<int,float> binCenters;
+  std::map<int,float> binContents;
+  std::map<int,float> binIntegrals;
+  for(int bin1 = M1; bin1 < M2; ++bin1)
+  {
+    binCenters[bin1] = histo->GetBinCenter(bin1+1);
+    binContents[bin1] = histo->GetBinContent(bin1+1);
+    
+    for(int bin2 = M1; bin2 <= bin1; ++bin2)
+      binIntegrals[bin1] += binContents[bin2];
+  }
+  
+  float min = 0.;
+  float max = 0.;
+  float delta = 999999.;
+  for(int bin1 = M1; bin1 < M2; ++bin1)
+  {
+    for(int bin2 = bin1+1; bin2 < M2; ++bin2)
+    {
+      if( (binIntegrals[bin2]-binIntegrals[bin1]) < integralMax ) continue;
+      
+      float tmpMin = histo -> GetBinCenter(bin1+1);
+      float tmpMax = histo -> GetBinCenter(bin2+1);
+      
+      if( (tmpMax-tmpMin) < delta )
+      {
+        delta = (tmpMax - tmpMin);
+        min = tmpMin;
+        max = tmpMax;
+      }
+      
+      break;
+    }
+  }
+  
+  TH1F* smallHisto = (TH1F*)( histo->Clone("smallHisto") );
+  for(int bin = 1; bin <= smallHisto->GetNbinsX(); ++bin)
+  {
+    if( smallHisto->GetBinCenter(bin) < min )
+      smallHisto -> SetBinContent(bin,0);
+    
+    if( smallHisto->GetBinCenter(bin) > max )
+      smallHisto -> SetBinContent(bin,0);
+  }
+  smallHisto -> SetFillColor(kYellow);
+  
+  float mean = smallHisto -> GetMean();
+  float meanErr = smallHisto -> GetMeanError();  
+  
+  ret[0] = mean;
+  ret[1] = meanErr;
+  ret[2] = min;
+  ret[3] = max;
+}
+
+
+
 
 
